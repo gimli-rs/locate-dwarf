@@ -1,0 +1,12 @@
+[package]
+name = "moria"
+version = "0.1.0"
+authors = ["Ted Mielczarek <ted@mielczarek.org>"]
+
+[dependencies]
+failure = "0.1.1"
+object = { git = "https://github.com/luser/object/", branch = "debug-symbols" }
+uuid = "0.5.1"
+
+[target.'cfg(target_os="macos")'.dependencies]
+CoreFoundation-sys = "0.1.4"
