@@ -1,9 +1,13 @@
 extern crate failure;
+extern crate libc;
 extern crate object;
 extern crate uuid;
 
 #[cfg(target_os="macos")]
-extern crate CoreFoundation_sys as cf;
+#[macro_use]
+extern crate core_foundation;
+#[cfg(target_os="macos")]
+extern crate core_foundation_sys;
 
 use failure::Error;
 use object::{DebugFileInfo, File, Object};
@@ -12,30 +16,26 @@ use uuid::Uuid;
 
 #[cfg(target_os="macos")]
 mod dsym {
-    use cf::base::{Boolean, CFAllocatorRef, CFGetTypeID, CFIndex, CFOptionFlags, CFStringRef,
-                   CFTypeRef, kCFAllocatorDefault};
-    use cf::array::{CFArrayGetTypeID, CFArrayGetCount, CFArrayGetValueAtIndex, CFArrayRef};
-    use cf::string::{CFStringCreateWithBytes, CFStringGetCStringPtr, CFStringGetTypeID,
-                     kCFStringEncodingUTF8};
+    use core_foundation::array::{CFArray, CFArrayRef};
+    use core_foundation::base::{CFType, CFTypeRef, TCFType};
+    use core_foundation::string::CFString;
+    use core_foundation_sys::base::{CFAllocatorRef, CFIndex, CFOptionFlags, CFRelease, CFTypeID,
+                                    kCFAllocatorDefault};
+    use core_foundation_sys::string::CFStringRef;
     use failure::{self, Error};
-    use std::ffi::CStr;
+    use libc::c_void;
     use std::path::{Path, PathBuf};
     use std::ptr;
     use uuid::Uuid;
 
+    type Boolean = ::std::os::raw::c_uchar;
     //const TRUE: Boolean = 1;
     const FALSE: Boolean = 0;
     #[repr(C)]
-    #[derive(Debug, Copy, Clone)]
-    struct __MDQuery {
-        _unused: [u8; 0],
-    }
+    struct __MDQuery(c_void);
     type MDQueryRef = *mut __MDQuery;
     #[repr(C)]
-    #[derive(Debug, Copy, Clone)]
-    struct __MDItem {
-        _unused: [u8; 0],
-    }
+    struct __MDItem(c_void);
     type MDItemRef = *mut __MDItem;
 
     #[allow(non_upper_case_globals)]
@@ -48,6 +48,8 @@ mod dsym {
                          valueListAttrs: CFArrayRef,
                          sortingAttrs: CFArrayRef)
                          -> MDQueryRef;
+        #[link_name = "\u{1}_MDQueryGetTypeID"]
+        fn MDQueryGetTypeID() -> CFTypeID;
         #[link_name = "\u{1}_MDQueryExecute"]
         fn MDQueryExecute(query: MDQueryRef,
                           optionFlags: CFOptionFlags)
@@ -60,6 +62,8 @@ mod dsym {
                                    -> *const ::std::os::raw::c_void;
         #[link_name = "\u{1}_MDItemCreate"]
         fn MDItemCreate(allocator: CFAllocatorRef, path: CFStringRef) -> MDItemRef;
+        #[link_name = "\u{1}_MDItemGetTypeID"]
+        pub fn MDItemGetTypeID() -> CFTypeID;
         #[link_name = "\u{1}_MDItemCopyAttribute"]
         fn MDItemCopyAttribute(item: MDItemRef,
                                name: CFStringRef)
@@ -68,55 +72,80 @@ mod dsym {
         static mut kMDItemPath: CFStringRef;
     }
 
-    fn cfstring_create(s: &str) -> Result<CFStringRef, Error> {
-        let cfs = unsafe {
-            CFStringCreateWithBytes(kCFAllocatorDefault,
-                                    s.as_ptr(),
-                                    s.len() as CFIndex,
-                                    kCFStringEncodingUTF8,
-                                    FALSE)
+    struct MDQuery(MDQueryRef);
+
+    impl MDQuery {
+        pub fn create(query_string: &str) -> Result<MDQuery, Error> {
+            let cf_query_string = CFString::new(&query_string);
+            let query = unsafe {
+                MDQueryCreate(kCFAllocatorDefault,
+                              ctref(&cf_query_string),
+                              ptr::null(),
+                              ptr::null())
+            };
+            if query == ptr::null_mut() {
+                return Err(failure::err_msg("MDQueryCreate failed"));
+            }
+            unsafe { Ok(MDQuery::wrap_under_create_rule(query)) }
+        }
+        pub fn execute(&self) -> Result<CFIndex, Error> {
+            if unsafe { MDQueryExecute(ctref(self), kMDQuerySynchronous) } == FALSE {
+                return Err(failure::err_msg("MDQueryExecute failed"));
+            }
+            unsafe { Ok(MDQueryGetResultCount(ctref(self))) }
+        }
+    }
+    impl Drop for MDQuery {
+        fn drop(&mut self) {
+            unsafe {
+                CFRelease(self.as_CFTypeRef())
+            }
+        }
+    }
+    impl_TCFType!(MDQuery, MDQueryRef, MDQueryGetTypeID);
+
+    struct MDItem(MDItemRef);
+    impl Drop for MDItem {
+        fn drop(&mut self) {
+            unsafe {
+                CFRelease(self.as_CFTypeRef())
+            }
+        }
+    }
+    impl_TCFType!(MDItem, MDItemRef, MDItemGetTypeID);
+
+    #[inline]
+    fn ctref<T, C>(t: &T) -> C
+        where T: TCFType<C>
+    {
+        t.as_concrete_TypeRef()
+    }
+
+    fn cftype_to_string(cft: CFType) -> Result<String, Error> {
+        if !cft.instance_of::<_, CFString>() {
+            return Err(failure::err_msg("Not a string"));
+        }
+        let cf_string = unsafe {
+            CFString::wrap_under_get_rule(ctref(&cft) as CFStringRef)
         };
-        if cfs == ptr::null() {
-            Err(failure::err_msg("CFStringCreateWithBytes failed"))
-        } else {
-            Ok(cfs)
-        }
-    }
-
-    fn cfstring_to_string(cfs: CFStringRef) -> Result<String, Error> {
-        let s = unsafe { CStr::from_ptr(CFStringGetCStringPtr(cfs, kCFStringEncodingUTF8)) };
-        Ok(s.to_str()?.to_owned())
-    }
-
-    fn get_string_attribute(item: MDItemRef, attribute: CFStringRef) -> Result<String, Error> {
-        let cf_attr = unsafe { MDItemCopyAttribute(item, attribute) };
-        if unsafe { CFGetTypeID(cf_attr) != CFStringGetTypeID() } {
-            return Err(failure::err_msg("Not a string attribute"));
-        }
-        cfstring_to_string(cf_attr as CFStringRef)
+        Ok(cf_string.to_string())
     }
 
     /// Attempt to locate the Mach-O file inside a dSYM matching `uuid` using spotlight.
     fn spotlight_locate_dsym_bundle(uuid: Uuid) -> Result<String, Error> {
         let uuid = uuid.hyphenated().to_string().to_uppercase();
         let query_string = format!("com_apple_xcode_dsym_uuids == {}", uuid);
-        let cf_query_string = cfstring_create(&query_string)?;
-        let query = unsafe {
-            MDQueryCreate(kCFAllocatorDefault,
-                          cf_query_string,
-                          ptr::null(),
-                          ptr::null())
-        };
-        if query == ptr::null_mut() {
-            return Err(failure::err_msg("MDQueryCreate failed"));
-        }
-        if unsafe { MDQueryExecute(query, kMDQuerySynchronous) } == FALSE {
-            return Err(failure::err_msg("MDQueryExecute failed"));
-        }
-        let count = unsafe { MDQueryGetResultCount(query) };
+        let query = MDQuery::create(&query_string)?;
+        let count = query.execute()?;
         for i in 0..count {
-            let item = unsafe { MDQueryGetResultAtIndex(query, i) as MDItemRef };
-            if let Ok(path) = get_string_attribute(item, unsafe { kMDItemPath }) {
+            let item = unsafe { MDQueryGetResultAtIndex(ctref(&query), i) as MDItemRef };
+            let attr = unsafe { CFString::wrap_under_get_rule(kMDItemPath) };
+            let cf_attr = unsafe { MDItemCopyAttribute(item, ctref(&attr)) };
+            if cf_attr == ptr::null_mut() {
+                return Err(failure::err_msg("MDItemCopyAttribute failed"));
+            }
+            let cf_attr = unsafe { CFType::wrap_under_get_rule(cf_attr) };
+            if let Ok(path) = cftype_to_string(cf_attr) {
                 return Ok(path);
             }
         }
@@ -125,26 +154,29 @@ mod dsym {
 
     /// Get the path to the Mach-O file containing DWARF debug info inside `bundle`.
     fn spotlight_get_dsym_path(bundle: &str) -> Result<String, Error> {
-        let cf_bundle_string = cfstring_create(&bundle)?;
-        let bundle_item = unsafe { MDItemCreate(kCFAllocatorDefault, cf_bundle_string) };
+        let cf_bundle_string = CFString::new(bundle);
+        let bundle_item = unsafe { MDItemCreate(kCFAllocatorDefault,
+                                                ctref(&cf_bundle_string)) };
         if bundle_item == ptr::null_mut() {
             return Err(failure::err_msg("MDItemCreate failed"));
         }
-        let attr = cfstring_create("com_apple_xcode_dsym_paths")?;
-        let cf_attr = unsafe { MDItemCopyAttribute(bundle_item, attr) };
-        if unsafe { CFGetTypeID(cf_attr) != CFArrayGetTypeID() } {
+        let bundle_item = unsafe { MDItem::wrap_under_create_rule(bundle_item) };
+        let attr = CFString::from_static_string("com_apple_xcode_dsym_paths");
+        let cf_attr = unsafe {
+            CFType::wrap_under_get_rule(MDItemCopyAttribute(ctref(&bundle_item),
+                                                            ctref(&attr)))
+        };
+        if !cf_attr.instance_of::<_, CFArray>() {
             return Err(failure::err_msg("dsym_paths attribute not an array"));
         }
-        let cf_array = cf_attr as CFArrayRef;
-        let count = unsafe { CFArrayGetCount(cf_array) };
-        if count == 0 {
-            return Err(failure::err_msg("dsym_paths array is empty"));
+        let cf_array = unsafe {
+            CFArray::wrap_under_get_rule(ctref(&cf_attr) as CFArrayRef)
+        };
+        if let Some(cf_item) = cf_array.iter().nth(0) {
+            let cf_item = unsafe { CFType::wrap_under_get_rule(cf_item) };
+            return cftype_to_string(cf_item);
         }
-        let cf_item = unsafe { CFArrayGetValueAtIndex(cf_array, 0) };
-        if unsafe { CFGetTypeID(cf_item) != CFStringGetTypeID() } {
-            return Err(failure::err_msg("dsym_paths entry not a string"));
-        }
-        cfstring_to_string(cf_item as CFStringRef)
+        return Err(failure::err_msg("dsym_paths array is empty"));
     }
 
     pub fn locate(_path: &Path, uuid: Uuid) -> Result<PathBuf, Error> {
