@@ -17,7 +17,7 @@ mod dsym {
     use cf::array::{CFArrayGetTypeID, CFArrayGetCount, CFArrayGetValueAtIndex, CFArrayRef};
     use cf::string::{CFStringCreateWithBytes, CFStringGetCStringPtr, CFStringGetTypeID,
                      kCFStringEncodingUTF8};
-    use failure::Error;
+    use failure::{self, Error};
     use std::ffi::CStr;
     use std::path::{Path, PathBuf};
     use std::ptr;
