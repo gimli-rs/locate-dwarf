@@ -17,7 +17,7 @@ mod dsym {
     use cf::array::{CFArrayGetTypeID, CFArrayGetCount, CFArrayGetValueAtIndex, CFArrayRef};
     use cf::string::{CFStringCreateWithBytes, CFStringGetCStringPtr, CFStringGetTypeID,
                      kCFStringEncodingUTF8};
-    use failure::{self, Error};
+    use failure::Error;
     use std::ffi::CStr;
     use std::path::{Path, PathBuf};
     use std::ptr;
@@ -155,6 +155,10 @@ mod dsym {
 
 #[cfg(not(target_os="macos"))]
 mod dsym {
+    use failure::{self, Error};
+    use std::path::{Path, PathBuf};
+    use uuid::Uuid;
+
     /// Attempt to find the DWARF-containing file inside a dSYM bundle for the Mach-O binary
     /// at `path` using simple path manipulation.
     pub fn locate(path: &Path, _uuid: Uuid) -> Result<PathBuf, Error> {
