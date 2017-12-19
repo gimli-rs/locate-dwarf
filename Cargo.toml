@@ -1,7 +1,10 @@
 [package]
 name = "moria"
+description = "Locate debug symbols for stripped binaries."
 version = "0.1.0"
+license = "Apache-2.0/MIT"
 authors = ["Ted Mielczarek <ted@mielczarek.org>"]
+repository = "https://github.com/gimli-rs/moria"
 
 [dependencies]
 failure = "0.1.1"
