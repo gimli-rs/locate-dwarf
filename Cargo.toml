@@ -9,7 +9,7 @@ repository = "https://github.com/gimli-rs/moria"
 [dependencies]
 failure = "0.1.1"
 libc = "0.2.34"
-object = { git = "https://github.com/luser/object/", branch = "debug-symbols" }
+object = { git = "https://github.com/gimli-rs/object" }
 uuid = "0.5.1"
 
 [target.'cfg(target_os="macos")'.dependencies]
