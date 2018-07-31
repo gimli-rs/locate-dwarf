@@ -7,9 +7,10 @@ authors = ["Ted Mielczarek <ted@mielczarek.org>"]
 repository = "https://github.com/gimli-rs/moria"
 
 [dependencies]
+cfg-if = "0.1"
 failure = "0.1.1"
 libc = "0.2.34"
-object = { git = "https://github.com/gimli-rs/object/", rev = "0fb54d82c755e317b96d4b0d57714028d05ad95c" }
+object = "0.8.0"
 uuid = "0.5.1"
 
 [target.'cfg(target_os="macos")'.dependencies]
