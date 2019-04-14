@@ -5,10 +5,10 @@ extern crate libc;
 extern crate object;
 extern crate uuid;
 
-#[cfg(target_os="macos")]
+#[cfg(target_os = "macos")]
 #[macro_use]
 extern crate core_foundation;
-#[cfg(target_os="macos")]
+#[cfg(target_os = "macos")]
 extern crate core_foundation_sys;
 
 use failure::Error;
@@ -35,13 +35,14 @@ cfg_if! {
     }
 }
 
-#[cfg(target_os="macos")]
+#[cfg(target_os = "macos")]
 mod dsym {
     use core_foundation::array::{CFArray, CFArrayRef};
     use core_foundation::base::{CFType, CFTypeRef, TCFType};
     use core_foundation::string::CFString;
-    use core_foundation_sys::base::{CFAllocatorRef, CFIndex, CFOptionFlags, CFRelease, CFTypeID,
-                                    kCFAllocatorDefault};
+    use core_foundation_sys::base::{
+        kCFAllocatorDefault, CFAllocatorRef, CFIndex, CFOptionFlags, CFRelease, CFTypeID,
+    };
     use core_foundation_sys::string::CFStringRef;
     use failure::{self, Error};
     use libc::c_void;
@@ -63,32 +64,30 @@ mod dsym {
     const kMDQuerySynchronous: CFOptionFlags = 1;
     #[link(name = "CoreServices", kind = "framework")]
     extern "C" {
-        #[link_name="\u{1}_MDQueryCreate"]
-        fn MDQueryCreate(allocator: CFAllocatorRef,
-                         queryString: CFStringRef,
-                         valueListAttrs: CFArrayRef,
-                         sortingAttrs: CFArrayRef)
-                         -> MDQueryRef;
+        #[link_name = "\u{1}_MDQueryCreate"]
+        fn MDQueryCreate(
+            allocator: CFAllocatorRef,
+            queryString: CFStringRef,
+            valueListAttrs: CFArrayRef,
+            sortingAttrs: CFArrayRef,
+        ) -> MDQueryRef;
         #[link_name = "\u{1}_MDQueryGetTypeID"]
         fn MDQueryGetTypeID() -> CFTypeID;
         #[link_name = "\u{1}_MDQueryExecute"]
-        fn MDQueryExecute(query: MDQueryRef,
-                          optionFlags: CFOptionFlags)
-                          -> Boolean;
+        fn MDQueryExecute(query: MDQueryRef, optionFlags: CFOptionFlags) -> Boolean;
         #[link_name = "\u{1}_MDQueryGetResultCount"]
         fn MDQueryGetResultCount(query: MDQueryRef) -> CFIndex;
         #[link_name = "\u{1}_MDQueryGetResultAtIndex"]
-        fn MDQueryGetResultAtIndex(query: MDQueryRef,
-                                   idx: CFIndex)
-                                   -> *const ::std::os::raw::c_void;
+        fn MDQueryGetResultAtIndex(
+            query: MDQueryRef,
+            idx: CFIndex,
+        ) -> *const ::std::os::raw::c_void;
         #[link_name = "\u{1}_MDItemCreate"]
         fn MDItemCreate(allocator: CFAllocatorRef, path: CFStringRef) -> MDItemRef;
         #[link_name = "\u{1}_MDItemGetTypeID"]
         pub fn MDItemGetTypeID() -> CFTypeID;
         #[link_name = "\u{1}_MDItemCopyAttribute"]
-        fn MDItemCopyAttribute(item: MDItemRef,
-                               name: CFStringRef)
-                               -> CFTypeRef;
+        fn MDItemCopyAttribute(item: MDItemRef, name: CFStringRef) -> CFTypeRef;
         #[link_name = "\u{1}_kMDItemPath"]
         static mut kMDItemPath: CFStringRef;
     }
@@ -99,10 +98,12 @@ mod dsym {
         pub fn create(query_string: &str) -> Result<MDQuery, Error> {
             let cf_query_string = CFString::new(&query_string);
             let query = unsafe {
-                MDQueryCreate(kCFAllocatorDefault,
-                              ctref(&cf_query_string),
-                              ptr::null(),
-                              ptr::null())
+                MDQueryCreate(
+                    kCFAllocatorDefault,
+                    ctref(&cf_query_string),
+                    ptr::null(),
+                    ptr::null(),
+                )
             };
             if query == ptr::null_mut() {
                 return Err(failure::err_msg("MDQueryCreate failed"));
@@ -118,9 +119,7 @@ mod dsym {
     }
     impl Drop for MDQuery {
         fn drop(&mut self) {
-            unsafe {
-                CFRelease(self.as_CFTypeRef())
-            }
+            unsafe { CFRelease(self.as_CFTypeRef()) }
         }
     }
     impl_TCFType!(MDQuery, MDQueryRef, MDQueryGetTypeID);
@@ -128,16 +127,15 @@ mod dsym {
     struct MDItem(MDItemRef);
     impl Drop for MDItem {
         fn drop(&mut self) {
-            unsafe {
-                CFRelease(self.as_CFTypeRef())
-            }
+            unsafe { CFRelease(self.as_CFTypeRef()) }
         }
     }
     impl_TCFType!(MDItem, MDItemRef, MDItemGetTypeID);
 
     #[inline]
     fn ctref<T, C>(t: &T) -> C
-        where T: TCFType<C>
+    where
+        T: TCFType<C>,
     {
         t.as_concrete_TypeRef()
     }
@@ -146,9 +144,7 @@ mod dsym {
         if !cft.instance_of::<_, CFString>() {
             return Err(failure::err_msg("Not a string"));
         }
-        let cf_string = unsafe {
-            CFString::wrap_under_get_rule(ctref(&cft) as CFStringRef)
-        };
+        let cf_string = unsafe { CFString::wrap_under_get_rule(ctref(&cft) as CFStringRef) };
         Ok(cf_string.to_string())
     }
 
@@ -176,23 +172,19 @@ mod dsym {
     /// Get the path to the Mach-O file containing DWARF debug info inside `bundle`.
     fn spotlight_get_dsym_path(bundle: &str) -> Result<String, Error> {
         let cf_bundle_string = CFString::new(bundle);
-        let bundle_item = unsafe { MDItemCreate(kCFAllocatorDefault,
-                                                ctref(&cf_bundle_string)) };
+        let bundle_item = unsafe { MDItemCreate(kCFAllocatorDefault, ctref(&cf_bundle_string)) };
         if bundle_item == ptr::null_mut() {
             return Err(failure::err_msg("MDItemCreate failed"));
         }
         let bundle_item = unsafe { MDItem::wrap_under_create_rule(bundle_item) };
         let attr = CFString::from_static_string("com_apple_xcode_dsym_paths");
         let cf_attr = unsafe {
-            CFType::wrap_under_get_rule(MDItemCopyAttribute(ctref(&bundle_item),
-                                                            ctref(&attr)))
+            CFType::wrap_under_get_rule(MDItemCopyAttribute(ctref(&bundle_item), ctref(&attr)))
         };
         if !cf_attr.instance_of::<_, CFArray>() {
             return Err(failure::err_msg("dsym_paths attribute not an array"));
         }
-        let cf_array = unsafe {
-            CFArray::wrap_under_get_rule(ctref(&cf_attr) as CFArrayRef)
-        };
+        let cf_array = unsafe { CFArray::wrap_under_get_rule(ctref(&cf_attr) as CFArrayRef) };
         if let Some(cf_item) = cf_array.iter().nth(0) {
             let cf_item = unsafe { CFType::wrap_under_get_rule(cf_item) };
             return cftype_to_string(cf_item);
@@ -206,7 +198,7 @@ mod dsym {
     }
 }
 
-#[cfg(not(target_os="macos"))]
+#[cfg(not(target_os = "macos"))]
 mod dsym {
     use failure::{self, Error};
     use std::path::{Path, PathBuf};
@@ -215,11 +207,13 @@ mod dsym {
     /// Attempt to find the DWARF-containing file inside a dSYM bundle for the Mach-O binary
     /// at `path` using simple path manipulation.
     pub fn locate(path: &Path, _uuid: Uuid) -> Result<PathBuf, Error> {
-        let filename = path.file_name()
-            .ok_or(failure::err_msg("Bad path"))?;
+        let filename = path.file_name().ok_or(failure::err_msg("Bad path"))?;
         let mut dsym = filename.to_owned();
         dsym.push(".dSYM");
-        let f = path.with_file_name(&dsym).join("Contents/Resources/DWARF").join(filename);
+        let f = path
+            .with_file_name(&dsym)
+            .join("Contents/Resources/DWARF")
+            .join(filename);
         if f.exists() {
             Ok(f)
         } else {
@@ -235,7 +229,8 @@ mod dsym {
 ///
 /// Currently only locating Mach-O dSYM bundles is supported.
 pub fn locate_debug_symbols<T>(object: &File, path: T) -> Result<PathBuf, Error>
-    where T: AsRef<Path>,
+where
+    T: AsRef<Path>,
 {
     if let Some(uuid) = object.mach_uuid() {
         return locate_dsym(path.as_ref(), uuid);
@@ -257,7 +252,8 @@ pub fn locate_debug_symbols<T>(object: &File, path: T) -> Result<PathBuf, Error>
 /// Attempt to locate the Mach-O file contained within a dSYM bundle containing the debug
 /// symbols for the Mach-O file at `path` with UUID `uuid`.
 pub fn locate_dsym<T>(path: T, uuid: Uuid) -> Result<PathBuf, Error>
-    where T: AsRef<Path>,
+where
+    T: AsRef<Path>,
 {
     dsym::locate(path.as_ref(), uuid)
 }
