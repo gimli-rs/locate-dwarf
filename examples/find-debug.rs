@@ -1,7 +1,3 @@
-extern crate failure;
-extern crate moria;
-extern crate object;
-
 use std::env;
 use std::fs::File;
 use std::io::Read;

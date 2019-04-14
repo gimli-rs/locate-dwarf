@@ -2,6 +2,7 @@
 name = "moria"
 description = "Locate debug symbols for stripped binaries."
 version = "0.1.0"
+edition = "2018"
 license = "Apache-2.0/MIT"
 authors = ["Ted Mielczarek <ted@mielczarek.org>"]
 repository = "https://github.com/gimli-rs/moria"

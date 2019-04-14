@@ -1,16 +1,3 @@
-#[macro_use]
-extern crate cfg_if;
-extern crate failure;
-extern crate libc;
-extern crate object;
-extern crate uuid;
-
-#[cfg(target_os = "macos")]
-#[macro_use]
-extern crate core_foundation;
-#[cfg(target_os = "macos")]
-extern crate core_foundation_sys;
-
 use failure::Error;
 use object::{File, Object};
 use std::fmt::Write;
@@ -18,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-cfg_if! {
+cfg_if::cfg_if! {
     if #[cfg(unix)] {
         use std::ffi::OsStr;
         use std::os::unix::ffi::OsStrExt;
@@ -39,6 +26,7 @@ cfg_if! {
 mod dsym {
     use core_foundation::array::{CFArray, CFArrayRef};
     use core_foundation::base::{CFType, CFTypeRef, TCFType};
+    use core_foundation::impl_TCFType;
     use core_foundation::string::CFString;
     use core_foundation_sys::base::{
         kCFAllocatorDefault, CFAllocatorRef, CFIndex, CFOptionFlags, CFRelease, CFTypeID,
@@ -228,7 +216,7 @@ mod dsym {
 /// or if the debug symbol file is not present on disk, return an error.
 ///
 /// Currently only locating Mach-O dSYM bundles is supported.
-pub fn locate_debug_symbols<T>(object: &File, path: T) -> Result<PathBuf, Error>
+pub fn locate_debug_symbols<T>(object: &File<'_>, path: T) -> Result<PathBuf, Error>
 where
     T: AsRef<Path>,
 {
