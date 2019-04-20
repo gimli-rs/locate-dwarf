@@ -1,3 +1,5 @@
+#![warn(clippy::all)]
+
 use failure::Error;
 use object::{File, Object};
 use std::fmt::Write;
@@ -93,7 +95,7 @@ mod dsym {
                     ptr::null(),
                 )
             };
-            if query == ptr::null_mut() {
+            if query.is_null() {
                 return Err(failure::err_msg("MDQueryCreate failed"));
             }
             unsafe { Ok(MDQuery::wrap_under_create_rule(query)) }
@@ -146,7 +148,7 @@ mod dsym {
             let item = unsafe { MDQueryGetResultAtIndex(ctref(&query), i) as MDItemRef };
             let attr = unsafe { CFString::wrap_under_get_rule(kMDItemPath) };
             let cf_attr = unsafe { MDItemCopyAttribute(item, ctref(&attr)) };
-            if cf_attr == ptr::null_mut() {
+            if cf_attr.is_null() {
                 return Err(failure::err_msg("MDItemCopyAttribute failed"));
             }
             let cf_attr = unsafe { CFType::wrap_under_get_rule(cf_attr) };
@@ -154,14 +156,14 @@ mod dsym {
                 return Ok(path);
             }
         }
-        return Err(failure::err_msg("dSYM not found"));
+        Err(failure::err_msg("dSYM not found"))
     }
 
     /// Get the path to the Mach-O file containing DWARF debug info inside `bundle`.
     fn spotlight_get_dsym_path(bundle: &str) -> Result<String, Error> {
         let cf_bundle_string = CFString::new(bundle);
         let bundle_item = unsafe { MDItemCreate(kCFAllocatorDefault, ctref(&cf_bundle_string)) };
-        if bundle_item == ptr::null_mut() {
+        if bundle_item.is_null() {
             return Err(failure::err_msg("MDItemCreate failed"));
         }
         let bundle_item = unsafe { MDItem::wrap_under_create_rule(bundle_item) };
@@ -177,7 +179,7 @@ mod dsym {
             let cf_item = unsafe { CFType::wrap_under_get_rule(cf_item) };
             return cftype_to_string(cf_item);
         }
-        return Err(failure::err_msg("dsym_paths array is empty"));
+        Err(failure::err_msg("dsym_paths array is empty"))
     }
 
     pub fn locate(_path: &Path, uuid: Uuid) -> Result<PathBuf, Error> {
@@ -275,7 +277,7 @@ where
     U: AsRef<Path>,
 {
     let path = fs::canonicalize(path)?;
-    let parent = path.parent().ok_or(failure::err_msg("Bad path"))?;
+    let parent = path.parent().ok_or_else(|| failure::err_msg("Bad path"))?;
     let filename = filename.as_ref();
 
     // TODO: check CRC
