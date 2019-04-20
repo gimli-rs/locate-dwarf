@@ -1,5 +1,5 @@
 use core_foundation::array::{CFArray, CFArrayRef};
-use core_foundation::base::{CFType, CFTypeRef, TCFType};
+use core_foundation::base::{CFType, CFTypeRef, TCFType, TCFTypeRef};
 use core_foundation::impl_TCFType;
 use core_foundation::string::CFString;
 use core_foundation_sys::base::{
@@ -92,19 +92,21 @@ impl Drop for MDItem {
 impl_TCFType!(MDItem, MDItemRef, MDItemGetTypeID);
 
 #[inline]
-fn ctref<T, C>(t: &T) -> C
+fn ctref<T>(t: &T) -> T::Ref
 where
-    T: TCFType<C>,
+    T: TCFType,
 {
     t.as_concrete_TypeRef()
 }
 
-fn cftype_to_string(cft: CFType) -> Result<String, Error> {
-    if !cft.instance_of::<_, CFString>() {
-        return Err(failure::err_msg("Not a string"));
+fn cast<T, U>(t: &T) -> Result<U, Error> where T: TCFType, U: TCFType {
+    if !t.instance_of::<U>() {
+        return Err(failure::err_msg("dsym_paths attribute not an array"));
     }
-    let cf_string = unsafe { CFString::wrap_under_get_rule(ctref(&cft) as CFStringRef) };
-    Ok(cf_string.to_string())
+
+    let t: *const c_void = t.as_concrete_TypeRef().as_void_ptr();
+
+    Ok(unsafe { U::wrap_under_get_rule(U::Ref::from_void_ptr(t)) })
 }
 
 /// Attempt to locate the Mach-O file inside a dSYM matching `uuid` using spotlight.
@@ -121,8 +123,8 @@ fn spotlight_locate_dsym_bundle(uuid: Uuid) -> Result<String, Error> {
             return Err(failure::err_msg("MDItemCopyAttribute failed"));
         }
         let cf_attr = unsafe { CFType::wrap_under_get_rule(cf_attr) };
-        if let Ok(path) = cftype_to_string(cf_attr) {
-            return Ok(path);
+        if let Ok(path) = cast::<CFType, CFString>(&cf_attr) {
+            return Ok(path.to_string());
         }
     }
     Err(failure::err_msg("dSYM not found"))
@@ -140,13 +142,10 @@ fn spotlight_get_dsym_path(bundle: &str) -> Result<String, Error> {
     let cf_attr = unsafe {
         CFType::wrap_under_get_rule(MDItemCopyAttribute(ctref(&bundle_item), ctref(&attr)))
     };
-    if !cf_attr.instance_of::<_, CFArray>() {
-        return Err(failure::err_msg("dsym_paths attribute not an array"));
-    }
-    let cf_array = unsafe { CFArray::wrap_under_get_rule(ctref(&cf_attr) as CFArrayRef) };
+    let cf_array = cast::<CFType, CFArray<CFType>>(&cf_attr)?;
     if let Some(cf_item) = cf_array.iter().nth(0) {
-        let cf_item = unsafe { CFType::wrap_under_get_rule(cf_item) };
-        return cftype_to_string(cf_item);
+        let cf_item = unsafe { CFType::wrap_under_get_rule(ctref(&*cf_item)) };
+        return cast::<CFType, CFString>(&cf_item).map(|s| s.to_string());
     }
     Err(failure::err_msg("dsym_paths array is empty"))
 }
