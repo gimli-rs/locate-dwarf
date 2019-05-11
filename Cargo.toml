@@ -2,6 +2,7 @@
 name = "moria"
 description = "Locate debug symbols for stripped binaries."
 version = "0.1.0"
+edition = "2018"
 license = "Apache-2.0/MIT"
 authors = ["Ted Mielczarek <ted@mielczarek.org>"]
 repository = "https://github.com/gimli-rs/moria"
@@ -14,5 +15,5 @@ object = "0.11.0"
 uuid = "0.7"
 
 [target.'cfg(target_os="macos")'.dependencies]
-core-foundation = "0.4.6"
-core-foundation-sys = "0.4.6"
+core-foundation = "0.6.2"
+core-foundation-sys = "0.6.2"

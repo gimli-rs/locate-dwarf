@@ -1,15 +1,4 @@
-#[macro_use]
-extern crate cfg_if;
-extern crate failure;
-extern crate libc;
-extern crate object;
-extern crate uuid;
-
-#[cfg(target_os="macos")]
-#[macro_use]
-extern crate core_foundation;
-#[cfg(target_os="macos")]
-extern crate core_foundation_sys;
+#![warn(clippy::all)]
 
 use failure::Error;
 use object::{File, Object};
@@ -18,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-cfg_if! {
+cfg_if::cfg_if! {
     if #[cfg(unix)] {
         use std::ffi::OsStr;
         use std::os::unix::ffi::OsStrExt;
@@ -35,196 +24,91 @@ cfg_if! {
     }
 }
 
-#[cfg(target_os="macos")]
-mod dsym {
-    use core_foundation::array::{CFArray, CFArrayRef};
-    use core_foundation::base::{CFType, CFTypeRef, TCFType};
-    use core_foundation::string::CFString;
-    use core_foundation_sys::base::{CFAllocatorRef, CFIndex, CFOptionFlags, CFRelease, CFTypeID,
-                                    kCFAllocatorDefault};
-    use core_foundation_sys::string::CFStringRef;
-    use failure::{self, Error};
-    use libc::c_void;
-    use std::path::{Path, PathBuf};
-    use std::ptr;
-    use uuid::Uuid;
-
-    type Boolean = ::std::os::raw::c_uchar;
-    //const TRUE: Boolean = 1;
-    const FALSE: Boolean = 0;
-    #[repr(C)]
-    struct __MDQuery(c_void);
-    type MDQueryRef = *mut __MDQuery;
-    #[repr(C)]
-    struct __MDItem(c_void);
-    type MDItemRef = *mut __MDItem;
-
-    #[allow(non_upper_case_globals)]
-    const kMDQuerySynchronous: CFOptionFlags = 1;
-    #[link(name = "CoreServices", kind = "framework")]
-    extern "C" {
-        #[link_name="\u{1}_MDQueryCreate"]
-        fn MDQueryCreate(allocator: CFAllocatorRef,
-                         queryString: CFStringRef,
-                         valueListAttrs: CFArrayRef,
-                         sortingAttrs: CFArrayRef)
-                         -> MDQueryRef;
-        #[link_name = "\u{1}_MDQueryGetTypeID"]
-        fn MDQueryGetTypeID() -> CFTypeID;
-        #[link_name = "\u{1}_MDQueryExecute"]
-        fn MDQueryExecute(query: MDQueryRef,
-                          optionFlags: CFOptionFlags)
-                          -> Boolean;
-        #[link_name = "\u{1}_MDQueryGetResultCount"]
-        fn MDQueryGetResultCount(query: MDQueryRef) -> CFIndex;
-        #[link_name = "\u{1}_MDQueryGetResultAtIndex"]
-        fn MDQueryGetResultAtIndex(query: MDQueryRef,
-                                   idx: CFIndex)
-                                   -> *const ::std::os::raw::c_void;
-        #[link_name = "\u{1}_MDItemCreate"]
-        fn MDItemCreate(allocator: CFAllocatorRef, path: CFStringRef) -> MDItemRef;
-        #[link_name = "\u{1}_MDItemGetTypeID"]
-        pub fn MDItemGetTypeID() -> CFTypeID;
-        #[link_name = "\u{1}_MDItemCopyAttribute"]
-        fn MDItemCopyAttribute(item: MDItemRef,
-                               name: CFStringRef)
-                               -> CFTypeRef;
-        #[link_name = "\u{1}_kMDItemPath"]
-        static mut kMDItemPath: CFStringRef;
-    }
-
-    struct MDQuery(MDQueryRef);
-
-    impl MDQuery {
-        pub fn create(query_string: &str) -> Result<MDQuery, Error> {
-            let cf_query_string = CFString::new(&query_string);
-            let query = unsafe {
-                MDQueryCreate(kCFAllocatorDefault,
-                              ctref(&cf_query_string),
-                              ptr::null(),
-                              ptr::null())
-            };
-            if query == ptr::null_mut() {
-                return Err(failure::err_msg("MDQueryCreate failed"));
-            }
-            unsafe { Ok(MDQuery::wrap_under_create_rule(query)) }
+cfg_if::cfg_if! {
+    if #[cfg(target_os = "macos")] {
+        mod macos;
+        use crate::macos::locate_dsym_using_spotlight;
+    } else {
+        fn locate_dsym_using_spotlight(_uuid: uuid::Uuid) -> Result<PathBuf, Error> {
+            Err(failure::err_msg("Could not locate dSYM"))
         }
-        pub fn execute(&self) -> Result<CFIndex, Error> {
-            if unsafe { MDQueryExecute(ctref(self), kMDQuerySynchronous) } == FALSE {
-                return Err(failure::err_msg("MDQueryExecute failed"));
-            }
-            unsafe { Ok(MDQueryGetResultCount(ctref(self))) }
-        }
-    }
-    impl Drop for MDQuery {
-        fn drop(&mut self) {
-            unsafe {
-                CFRelease(self.as_CFTypeRef())
-            }
-        }
-    }
-    impl_TCFType!(MDQuery, MDQueryRef, MDQueryGetTypeID);
-
-    struct MDItem(MDItemRef);
-    impl Drop for MDItem {
-        fn drop(&mut self) {
-            unsafe {
-                CFRelease(self.as_CFTypeRef())
-            }
-        }
-    }
-    impl_TCFType!(MDItem, MDItemRef, MDItemGetTypeID);
-
-    #[inline]
-    fn ctref<T, C>(t: &T) -> C
-        where T: TCFType<C>
-    {
-        t.as_concrete_TypeRef()
-    }
-
-    fn cftype_to_string(cft: CFType) -> Result<String, Error> {
-        if !cft.instance_of::<_, CFString>() {
-            return Err(failure::err_msg("Not a string"));
-        }
-        let cf_string = unsafe {
-            CFString::wrap_under_get_rule(ctref(&cft) as CFStringRef)
-        };
-        Ok(cf_string.to_string())
-    }
-
-    /// Attempt to locate the Mach-O file inside a dSYM matching `uuid` using spotlight.
-    fn spotlight_locate_dsym_bundle(uuid: Uuid) -> Result<String, Error> {
-        let uuid = uuid.to_hyphenated().to_string().to_uppercase();
-        let query_string = format!("com_apple_xcode_dsym_uuids == {}", uuid);
-        let query = MDQuery::create(&query_string)?;
-        let count = query.execute()?;
-        for i in 0..count {
-            let item = unsafe { MDQueryGetResultAtIndex(ctref(&query), i) as MDItemRef };
-            let attr = unsafe { CFString::wrap_under_get_rule(kMDItemPath) };
-            let cf_attr = unsafe { MDItemCopyAttribute(item, ctref(&attr)) };
-            if cf_attr == ptr::null_mut() {
-                return Err(failure::err_msg("MDItemCopyAttribute failed"));
-            }
-            let cf_attr = unsafe { CFType::wrap_under_get_rule(cf_attr) };
-            if let Ok(path) = cftype_to_string(cf_attr) {
-                return Ok(path);
-            }
-        }
-        return Err(failure::err_msg("dSYM not found"));
-    }
-
-    /// Get the path to the Mach-O file containing DWARF debug info inside `bundle`.
-    fn spotlight_get_dsym_path(bundle: &str) -> Result<String, Error> {
-        let cf_bundle_string = CFString::new(bundle);
-        let bundle_item = unsafe { MDItemCreate(kCFAllocatorDefault,
-                                                ctref(&cf_bundle_string)) };
-        if bundle_item == ptr::null_mut() {
-            return Err(failure::err_msg("MDItemCreate failed"));
-        }
-        let bundle_item = unsafe { MDItem::wrap_under_create_rule(bundle_item) };
-        let attr = CFString::from_static_string("com_apple_xcode_dsym_paths");
-        let cf_attr = unsafe {
-            CFType::wrap_under_get_rule(MDItemCopyAttribute(ctref(&bundle_item),
-                                                            ctref(&attr)))
-        };
-        if !cf_attr.instance_of::<_, CFArray>() {
-            return Err(failure::err_msg("dsym_paths attribute not an array"));
-        }
-        let cf_array = unsafe {
-            CFArray::wrap_under_get_rule(ctref(&cf_attr) as CFArrayRef)
-        };
-        if let Some(cf_item) = cf_array.iter().nth(0) {
-            let cf_item = unsafe { CFType::wrap_under_get_rule(cf_item) };
-            return cftype_to_string(cf_item);
-        }
-        return Err(failure::err_msg("dsym_paths array is empty"));
-    }
-
-    pub fn locate(_path: &Path, uuid: Uuid) -> Result<PathBuf, Error> {
-        let bundle = spotlight_locate_dsym_bundle(uuid)?;
-        Ok(Path::new(&bundle).join(spotlight_get_dsym_path(&bundle)?))
     }
 }
 
-#[cfg(not(target_os="macos"))]
-mod dsym {
-    use failure::{self, Error};
-    use std::path::{Path, PathBuf};
-    use uuid::Uuid;
+/// On macOS it can take some time for spotlight to index the dSYM file and on other OSes it is
+/// impossible to use spotlight. When built by cargo, we can likely find the dSYM file in
+/// target/<profile>/deps or target/<profile>/examples. Otherwise it can likely be found at
+/// <filename>.dSYM. This function will try to find it there.
+///
+/// # Arguments
+///
+/// * Parsed version of the object file which needs its debuginfo.
+/// * Path to the object file.
+fn locate_dsym_fastpath(path: &Path, uuid: Uuid) -> Option<PathBuf> {
+    // Canonicalize the path to make sure the fastpath also works when current working
+    // dir is inside target/
+    let path = path.canonicalize().ok()?;
 
-    /// Attempt to find the DWARF-containing file inside a dSYM bundle for the Mach-O binary
-    /// at `path` using simple path manipulation.
-    pub fn locate(path: &Path, _uuid: Uuid) -> Result<PathBuf, Error> {
-        let filename = path.file_name()
-            .ok_or(failure::err_msg("Bad path"))?;
-        let mut dsym = filename.to_owned();
-        dsym.push(".dSYM");
-        let f = path.with_file_name(&dsym).join("Contents/Resources/DWARF").join(filename);
-        if f.exists() {
-            Ok(f)
-        } else {
-            Err(failure::err_msg("Could not locate dSYM"))
+    // First try <path>.dSYM
+    let mut dsym = path.file_name()?.to_owned();
+    dsym.push(".dSYM");
+    let dsym_dir = path.with_file_name(&dsym);
+    if let Some(f) = try_match_dsym(&dsym_dir, uuid) {
+        return Some(f);
+    }
+
+    // Get the path to the target dir of the current build channel.
+    let mut target_channel_dir = &*path;
+    loop {
+        let parent = target_channel_dir.parent()?;
+        target_channel_dir = parent;
+
+        if target_channel_dir.parent().and_then(Path::file_name)
+            == Some(std::ffi::OsStr::new("target"))
+        {
+            break; // target_dir = ???/target/<channel>
         }
+    }
+
+    // Check every entry in <target_channel_dir>/deps and <target_channel_dir>/examples
+    for dir in fs::read_dir(target_channel_dir.join("deps"))
+        .unwrap()
+        .chain(fs::read_dir(target_channel_dir.join("examples")).unwrap())
+    {
+        let dir = dir.unwrap().path();
+
+        // If not a dSYM dir, try next entry.
+        if dir.extension() != Some(std::ffi::OsStr::new("dSYM")) {
+            continue;
+        }
+
+        if let Some(debug_file_name) = try_match_dsym(&dir, uuid) {
+            return Some(debug_file_name);
+        }
+    }
+
+    None
+}
+
+fn try_match_dsym(dsym_dir: &Path, uuid: Uuid) -> Option<PathBuf> {
+    // Get path to inner object file.
+    let mut dir_iter = fs::read_dir(dsym_dir.join("Contents/Resources/DWARF")).ok()?;
+
+    let debug_file_name = dir_iter.next()?.ok()?.path();
+
+    if dir_iter.next().is_some() {
+        return None; // There should only be one file in the `DWARF` directory.
+    }
+
+    // Parse inner object file.
+    let file = fs::read(&debug_file_name).ok()?;
+    let dsym = object::File::parse(&file).ok()?;
+
+    // Make sure the dSYM file matches the object file to find debuginfo for.
+    if dsym.mach_uuid() == Some(uuid) {
+        Some(debug_file_name.to_owned())
+    } else {
+        None
     }
 }
 
@@ -234,8 +118,9 @@ mod dsym {
 /// or if the debug symbol file is not present on disk, return an error.
 ///
 /// Currently only locating Mach-O dSYM bundles is supported.
-pub fn locate_debug_symbols<T>(object: &File, path: T) -> Result<PathBuf, Error>
-    where T: AsRef<Path>,
+pub fn locate_debug_symbols<T>(object: &File<'_>, path: T) -> Result<PathBuf, Error>
+where
+    T: AsRef<Path>,
 {
     if let Some(uuid) = object.mach_uuid() {
         return locate_dsym(path.as_ref(), uuid);
@@ -257,9 +142,13 @@ pub fn locate_debug_symbols<T>(object: &File, path: T) -> Result<PathBuf, Error>
 /// Attempt to locate the Mach-O file contained within a dSYM bundle containing the debug
 /// symbols for the Mach-O file at `path` with UUID `uuid`.
 pub fn locate_dsym<T>(path: T, uuid: Uuid) -> Result<PathBuf, Error>
-    where T: AsRef<Path>,
+where
+    T: AsRef<Path>,
 {
-    dsym::locate(path.as_ref(), uuid)
+    if let Some(dsym_path) = locate_dsym_fastpath(path.as_ref(), uuid) {
+        return Ok(dsym_path);
+    }
+    locate_dsym_using_spotlight(uuid)
 }
 
 /// Attempt to locate the separate debug symbol file for the object file at `path` with
@@ -291,7 +180,7 @@ where
     U: AsRef<Path>,
 {
     let path = fs::canonicalize(path)?;
-    let parent = path.parent().ok_or(failure::err_msg("Bad path"))?;
+    let parent = path.parent().ok_or_else(|| failure::err_msg("Bad path"))?;
     let filename = filename.as_ref();
 
     // TODO: check CRC
