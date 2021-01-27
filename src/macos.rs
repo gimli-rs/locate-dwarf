@@ -1,3 +1,4 @@
+use crate::Uuid;
 use core_foundation::array::{CFArray, CFArrayRef};
 use core_foundation::base::{CFType, CFTypeRef, TCFType, TCFTypeRef};
 use core_foundation::impl_TCFType;
@@ -10,7 +11,6 @@ use failure::{self, Error};
 use libc::c_void;
 use std::path::{Path, PathBuf};
 use std::ptr;
-use uuid::Uuid;
 
 type Boolean = ::std::os::raw::c_uchar;
 //const TRUE: Boolean = 1;
@@ -99,7 +99,11 @@ where
     t.as_concrete_TypeRef()
 }
 
-fn cast<T, U>(t: &T) -> Result<U, Error> where T: TCFType, U: TCFType {
+fn cast<T, U>(t: &T) -> Result<U, Error>
+where
+    T: TCFType,
+    U: TCFType,
+{
     if !t.instance_of::<U>() {
         return Err(failure::err_msg("dsym_paths attribute not an array"));
     }
@@ -150,7 +154,7 @@ fn spotlight_get_dsym_path(bundle: &str) -> Result<String, Error> {
     Err(failure::err_msg("dsym_paths array is empty"))
 }
 
-pub fn locate_dsym_using_spotlight(uuid: uuid::Uuid) -> Result<PathBuf, Error> {
+pub fn locate_dsym_using_spotlight(uuid: Uuid) -> Result<PathBuf, Error> {
     let bundle = spotlight_locate_dsym_bundle(uuid)?;
     Ok(Path::new(&bundle).join(spotlight_get_dsym_path(&bundle)?))
 }
