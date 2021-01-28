@@ -1,7 +1,7 @@
 #![warn(clippy::all)]
 
 use anyhow::{anyhow, Error};
-use object::{File, Object};
+use object::Object;
 use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -119,8 +119,9 @@ fn try_match_dsym(dsym_dir: &Path, uuid: Uuid) -> Option<PathBuf> {
 /// or if the debug symbol file is not present on disk, return an error.
 ///
 /// Currently only locating Mach-O dSYM bundles is supported.
-pub fn locate_debug_symbols<T>(object: &File<'_>, path: T) -> Result<PathBuf, Error>
+pub fn locate_debug_symbols<'a, O, T>(object: &'a O, path: T) -> Result<PathBuf, Error>
 where
+    O:  Object<'a, 'a>,
     T: AsRef<Path>,
 {
     if let Some(uuid) = object.mach_uuid()? {
