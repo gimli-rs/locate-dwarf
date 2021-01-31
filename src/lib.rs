@@ -121,7 +121,7 @@ fn try_match_dsym(dsym_dir: &Path, uuid: Uuid) -> Option<PathBuf> {
 /// Currently only locating Mach-O dSYM bundles is supported.
 pub fn locate_debug_symbols<'a, O, T>(object: &'a O, path: T) -> Result<PathBuf, Error>
 where
-    O:  Object<'a, 'a>,
+    O: Object<'a, 'a>,
     T: AsRef<Path>,
 {
     if let Some(uuid) = object.mach_uuid()? {
