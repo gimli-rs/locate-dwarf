@@ -1,6 +1,4 @@
-[![Build Status](https://travis-ci.org/gimli-rs/moria.svg?branch=master)](https://travis-ci.org/gimli-rs/moria)
-
-# moria
+# locate-dwarf
 A crate to find DWARF debug symbols from stripped binaries
 
 ## License
