@@ -106,8 +106,8 @@ fn try_match_dsym(dsym_dir: &Path, uuid: Uuid) -> Option<PathBuf> {
     let dsym = object::File::parse(&file).ok()?;
 
     // Make sure the dSYM file matches the object file to find debuginfo for.
-    if dsym.mach_uuid() == Ok(Some(uuid.into())) {
-        Some(debug_file_name.to_owned())
+    if dsym.mach_uuid() == Ok(Some(uuid)) {
+        Some(debug_file_name)
     } else {
         None
     }
