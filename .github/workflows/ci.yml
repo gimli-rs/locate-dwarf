@@ -1,0 +1,59 @@
+on: [push, pull_request]
+
+name: locate-dwarf
+
+jobs:
+  ci:
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain:
+        - rust: stable
+        platform:
+        - target: x86_64-unknown-linux-gnu
+          host: ubuntu-latest
+          cross: false
+
+        - target: x86_64-apple-darwin
+          host: macos-latest
+          cross: false
+    env:
+      RUST_BACKTRACE: 1
+      CARGO_INCREMENTAL: 0
+
+    runs-on: ${{ matrix.platform.host }}
+    steps:
+    - name: Checkout sources
+      uses: actions/checkout@v2
+
+    - name: Install rust toolchain
+      uses: hecrj/setup-rust-action@v1
+      with:
+        rust-version: ${{ matrix.toolchain.rust }}
+        targets: ${{ matrix.platform.target }}
+
+    - name: Build
+      if: contains(matrix.platform.target, 'android') == false
+      run: cargo build --all --target ${{ matrix.platform.target }}
+
+    - name: Rust tests
+      if: matrix.platform.cross == false
+      run: cargo test --all
+
+  lint-rust:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout sources
+      uses: actions/checkout@v2
+
+    - name: Install rust toolchain
+      uses: hecrj/setup-rust-action@v1
+      with:
+        rust-version: stable
+        components: clippy, rustfmt
+
+    - name: cargo fmt
+      run: cargo fmt --all -- --check
+
+    - name: cargo clippy
+      run: cargo clippy --workspace --examples --tests -- -D warnings
