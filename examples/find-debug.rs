@@ -11,7 +11,7 @@ fn work() -> Result<()> {
     let mut buf = vec![];
     f.read_to_end(&mut buf)?;
     let obj = object::File::parse(&*buf).or(Err(anyhow!("Couldn't parse binary")))?;
-    let debug_path = moria::locate_debug_symbols(&obj, &path)?;
+    let debug_path = locate_dwarf::locate_debug_symbols(&obj, &path)?;
     println!("{}", debug_path.to_string_lossy());
     Ok(())
 }
