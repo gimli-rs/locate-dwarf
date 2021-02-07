@@ -8,12 +8,12 @@ authors = ["Ted Mielczarek <ted@mielczarek.org>"]
 repository = "https://github.com/gimli-rs/moria"
 
 [dependencies]
-cfg-if = "0.1"
-failure = "0.1.1"
-libc = "0.2.34"
-object = "0.15.0"
-uuid = "0.7"
+anyhow = "1.0.38"
+cfg-if = "1.0.0"
+libc = "0.2.82"
+object = "0.23.0"
 
 [target.'cfg(target_os="macos")'.dependencies]
-core-foundation = "0.6.2"
-core-foundation-sys = "0.6.2"
+core-foundation = "0.9.1"
+core-foundation-sys = "0.8.2"
+uuid = "0.8.2"

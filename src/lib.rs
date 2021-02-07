@@ -1,11 +1,12 @@
 #![warn(clippy::all)]
 
-use failure::Error;
-use object::{File, Object};
+use anyhow::{anyhow, Error};
+use object::Object;
 use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
-use uuid::Uuid;
+
+pub type Uuid = [u8; 16];
 
 cfg_if::cfg_if! {
     if #[cfg(unix)] {
@@ -29,8 +30,8 @@ cfg_if::cfg_if! {
         mod macos;
         use crate::macos::locate_dsym_using_spotlight;
     } else {
-        fn locate_dsym_using_spotlight(_uuid: uuid::Uuid) -> Result<PathBuf, Error> {
-            Err(failure::err_msg("Could not locate dSYM"))
+        fn locate_dsym_using_spotlight(_uuid: Uuid) -> Result<PathBuf, Error> {
+            Err(anyhow!("Could not locate dSYM"))
         }
     }
 }
@@ -105,7 +106,7 @@ fn try_match_dsym(dsym_dir: &Path, uuid: Uuid) -> Option<PathBuf> {
     let dsym = object::File::parse(&file).ok()?;
 
     // Make sure the dSYM file matches the object file to find debuginfo for.
-    if dsym.mach_uuid() == Some(uuid) {
+    if dsym.mach_uuid() == Ok(Some(uuid.into())) {
         Some(debug_file_name.to_owned())
     } else {
         None
@@ -118,25 +119,26 @@ fn try_match_dsym(dsym_dir: &Path, uuid: Uuid) -> Option<PathBuf> {
 /// or if the debug symbol file is not present on disk, return an error.
 ///
 /// Currently only locating Mach-O dSYM bundles is supported.
-pub fn locate_debug_symbols<T>(object: &File<'_>, path: T) -> Result<PathBuf, Error>
+pub fn locate_debug_symbols<'a, O, T>(object: &'a O, path: T) -> Result<PathBuf, Error>
 where
+    O: Object<'a, 'a>,
     T: AsRef<Path>,
 {
-    if let Some(uuid) = object.mach_uuid() {
+    if let Some(uuid) = object.mach_uuid()? {
         return locate_dsym(path.as_ref(), uuid);
     }
-    if let Some(build_id) = object.build_id() {
+    if let Some(build_id) = object.build_id()? {
         let path = locate_debug_build_id(build_id);
         if path.is_ok() {
             return path;
         }
         // If not found, try gnu_debuglink.
     }
-    if let Some((filename, crc)) = object.gnu_debuglink() {
+    if let Some((filename, crc)) = object.gnu_debuglink()? {
         let filename = path_from_bytes(filename)?;
         return locate_gnu_debuglink(path.as_ref(), filename, crc);
     }
-    Err(failure::err_msg("Object does not have debug info pointer"))
+    Err(anyhow!("Object does not have debug info pointer"))
 }
 
 /// Attempt to locate the Mach-O file contained within a dSYM bundle containing the debug
@@ -155,7 +157,7 @@ where
 /// build ID `id`.
 pub fn locate_debug_build_id(id: &[u8]) -> Result<PathBuf, Error> {
     if id.len() < 2 {
-        return Err(failure::err_msg("Build ID is too short"));
+        return Err(anyhow!("Build ID is too short"));
     }
 
     // Try "/usr/lib/debug/.build-id/12/345678etc.debug"
@@ -169,7 +171,7 @@ pub fn locate_debug_build_id(id: &[u8]) -> Result<PathBuf, Error> {
         return Ok(f);
     }
 
-    Err(failure::err_msg("Could not locate file with build ID"))
+    Err(anyhow!("Could not locate file with build ID"))
 }
 
 /// Attempt to locate the separate debug symbol file for the object file at `path` with
@@ -180,7 +182,7 @@ where
     U: AsRef<Path>,
 {
     let path = fs::canonicalize(path)?;
-    let parent = path.parent().ok_or_else(|| failure::err_msg("Bad path"))?;
+    let parent = path.parent().ok_or_else(|| anyhow!("Bad path"))?;
     let filename = filename.as_ref();
 
     // TODO: check CRC
@@ -204,5 +206,5 @@ where
         return Ok(f);
     }
 
-    Err(failure::err_msg("Could not locate GNU debug link file"))
+    Err(anyhow!("Could not locate GNU debug link file"))
 }

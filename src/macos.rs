@@ -1,3 +1,5 @@
+use crate::Uuid;
+use anyhow::{anyhow, Result};
 use core_foundation::array::{CFArray, CFArrayRef};
 use core_foundation::base::{CFType, CFTypeRef, TCFType, TCFTypeRef};
 use core_foundation::impl_TCFType;
@@ -6,11 +8,9 @@ use core_foundation_sys::base::{
     kCFAllocatorDefault, CFAllocatorRef, CFIndex, CFOptionFlags, CFRelease, CFTypeID,
 };
 use core_foundation_sys::string::CFStringRef;
-use failure::{self, Error};
 use libc::c_void;
 use std::path::{Path, PathBuf};
 use std::ptr;
-use uuid::Uuid;
 
 type Boolean = ::std::os::raw::c_uchar;
 //const TRUE: Boolean = 1;
@@ -54,7 +54,7 @@ extern "C" {
 struct MDQuery(MDQueryRef);
 
 impl MDQuery {
-    pub fn create(query_string: &str) -> Result<MDQuery, Error> {
+    pub fn create(query_string: &str) -> Result<MDQuery> {
         let cf_query_string = CFString::new(&query_string);
         let query = unsafe {
             MDQueryCreate(
@@ -65,13 +65,13 @@ impl MDQuery {
             )
         };
         if query.is_null() {
-            return Err(failure::err_msg("MDQueryCreate failed"));
+            return Err(anyhow!("MDQueryCreate failed"));
         }
         unsafe { Ok(MDQuery::wrap_under_create_rule(query)) }
     }
-    pub fn execute(&self) -> Result<CFIndex, Error> {
+    pub fn execute(&self) -> Result<CFIndex> {
         if unsafe { MDQueryExecute(ctref(self), kMDQuerySynchronous) } == FALSE {
-            return Err(failure::err_msg("MDQueryExecute failed"));
+            return Err(anyhow!("MDQueryExecute failed"));
         }
         unsafe { Ok(MDQueryGetResultCount(ctref(self))) }
     }
@@ -99,9 +99,13 @@ where
     t.as_concrete_TypeRef()
 }
 
-fn cast<T, U>(t: &T) -> Result<U, Error> where T: TCFType, U: TCFType {
+fn cast<T, U>(t: &T) -> Result<U>
+where
+    T: TCFType,
+    U: TCFType,
+{
     if !t.instance_of::<U>() {
-        return Err(failure::err_msg("dsym_paths attribute not an array"));
+        return Err(anyhow!("dsym_paths attribute not an array"));
     }
 
     let t: *const c_void = t.as_concrete_TypeRef().as_void_ptr();
@@ -110,8 +114,8 @@ fn cast<T, U>(t: &T) -> Result<U, Error> where T: TCFType, U: TCFType {
 }
 
 /// Attempt to locate the Mach-O file inside a dSYM matching `uuid` using spotlight.
-fn spotlight_locate_dsym_bundle(uuid: Uuid) -> Result<String, Error> {
-    let uuid = uuid.to_hyphenated().to_string().to_uppercase();
+fn spotlight_locate_dsym_bundle(uuid: Uuid) -> Result<String> {
+    let uuid = uuid::Uuid::from_slice(&uuid[..])?.to_hyphenated().to_string().to_uppercase();
     let query_string = format!("com_apple_xcode_dsym_uuids == {}", uuid);
     let query = MDQuery::create(&query_string)?;
     let count = query.execute()?;
@@ -120,22 +124,22 @@ fn spotlight_locate_dsym_bundle(uuid: Uuid) -> Result<String, Error> {
         let attr = unsafe { CFString::wrap_under_get_rule(kMDItemPath) };
         let cf_attr = unsafe { MDItemCopyAttribute(item, ctref(&attr)) };
         if cf_attr.is_null() {
-            return Err(failure::err_msg("MDItemCopyAttribute failed"));
+            return Err(anyhow!("MDItemCopyAttribute failed"));
         }
         let cf_attr = unsafe { CFType::wrap_under_get_rule(cf_attr) };
         if let Ok(path) = cast::<CFType, CFString>(&cf_attr) {
             return Ok(path.to_string());
         }
     }
-    Err(failure::err_msg("dSYM not found"))
+    Err(anyhow!("dSYM not found"))
 }
 
 /// Get the path to the Mach-O file containing DWARF debug info inside `bundle`.
-fn spotlight_get_dsym_path(bundle: &str) -> Result<String, Error> {
+fn spotlight_get_dsym_path(bundle: &str) -> Result<String> {
     let cf_bundle_string = CFString::new(bundle);
     let bundle_item = unsafe { MDItemCreate(kCFAllocatorDefault, ctref(&cf_bundle_string)) };
     if bundle_item.is_null() {
-        return Err(failure::err_msg("MDItemCreate failed"));
+        return Err(anyhow!("MDItemCreate failed"));
     }
     let bundle_item = unsafe { MDItem::wrap_under_create_rule(bundle_item) };
     let attr = CFString::from_static_string("com_apple_xcode_dsym_paths");
@@ -147,10 +151,10 @@ fn spotlight_get_dsym_path(bundle: &str) -> Result<String, Error> {
         let cf_item = unsafe { CFType::wrap_under_get_rule(ctref(&*cf_item)) };
         return cast::<CFType, CFString>(&cf_item).map(|s| s.to_string());
     }
-    Err(failure::err_msg("dsym_paths array is empty"))
+    Err(anyhow!("dsym_paths array is empty"))
 }
 
-pub fn locate_dsym_using_spotlight(uuid: uuid::Uuid) -> Result<PathBuf, Error> {
+pub fn locate_dsym_using_spotlight(uuid: Uuid) -> Result<PathBuf> {
     let bundle = spotlight_locate_dsym_bundle(uuid)?;
     Ok(Path::new(&bundle).join(spotlight_get_dsym_path(&bundle)?))
 }
