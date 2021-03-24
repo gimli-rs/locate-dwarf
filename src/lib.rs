@@ -118,12 +118,19 @@ fn try_match_dsym(dsym_dir: &Path, uuid: Uuid) -> Option<PathBuf> {
 /// If `object` does not contain information that can be used to locate debug symbols for it,
 /// or if the debug symbol file is not present on disk, return an error.
 ///
-/// Currently only locating Mach-O dSYM bundles is supported.
+/// Currently supports locating debug symbols using:
+///   * dsym bundles
+///   * GNU Build-ID
+///   * GNU debug link
 pub fn locate_debug_symbols<'a, O, T>(object: &'a O, path: T) -> Result<PathBuf, Error>
 where
     O: Object<'a, 'a>,
     T: AsRef<Path>,
 {
+    if object.has_debug_symbols() {
+        return Ok(PathBuf::from(path.as_ref()));
+    }
+
     if let Some(uuid) = object.mach_uuid()? {
         return locate_dsym(path.as_ref(), uuid);
     }
