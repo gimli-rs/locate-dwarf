@@ -12,7 +12,11 @@ fn work() -> Result<()> {
     f.read_to_end(&mut buf)?;
     let obj = object::File::parse(&*buf)?;
     let debug_path = locate_dwarf::locate_debug_symbols(&obj, &path)?;
-    println!("{}", debug_path.to_string_lossy());
+    if let Some(debug_path) = debug_path {
+        println!("{}", debug_path.display());
+    } else {
+        println!("Symbols not found for '{}'", path.to_string_lossy());
+    }
     Ok(())
 }
 

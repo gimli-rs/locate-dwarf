@@ -2,7 +2,6 @@
 
 use anyhow::{anyhow, Error};
 use object::Object;
-use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -31,8 +30,9 @@ cfg_if::cfg_if! {
         mod macos;
         use crate::macos::locate_dsym_using_spotlight;
     } else {
-        fn locate_dsym_using_spotlight(_uuid: Uuid) -> Result<PathBuf, Error> {
-            Err(anyhow!("Could not locate dSYM"))
+        #[allow(clippy::unnecessary_wraps)]
+        fn locate_dsym_using_spotlight(_uuid: Uuid) -> Result<Option<PathBuf>, Error> {
+            Ok(None)
         }
     }
 }
@@ -117,10 +117,10 @@ fn try_match_dsym(dsym_dir: &Path, uuid: Uuid) -> Option<PathBuf> {
 /// Attempt to locate the path to separate debug symbols for `object` at `path`.
 ///
 /// If `object` does not contain information that can be used to locate debug symbols for it,
-/// or if the debug symbol file is not present on disk, return an error.
+/// or if the debug symbol file is not present on disk, return None.
 ///
 /// Currently only locating Mach-O dSYM bundles is supported.
-pub fn locate_debug_symbols<'a, O, T>(object: &'a O, path: T) -> Result<PathBuf, Error>
+pub fn locate_debug_symbols<'a, O, T>(object: &'a O, path: T) -> Result<Option<PathBuf>, Error>
 where
     O: Object<'a, 'a>,
     T: AsRef<Path>,
@@ -130,8 +130,8 @@ where
     }
     if let Some(build_id) = object.build_id()? {
         let path = locate_debug_build_id(build_id);
-        if path.is_ok() {
-            return path;
+        if let Some(path) = path {
+            return Ok(Some(path));
         }
         // If not found, try gnu_debuglink.
     }
@@ -139,45 +139,45 @@ where
         let filename = path_from_bytes(filename)?;
         return locate_gnu_debuglink(path.as_ref(), filename, crc);
     }
-    Err(anyhow!("Object does not have debug info pointer"))
+    Ok(None)
 }
 
 /// Attempt to locate the Mach-O file contained within a dSYM bundle containing the debug
 /// symbols for the Mach-O file at `path` with UUID `uuid`.
-pub fn locate_dsym<T>(path: T, uuid: Uuid) -> Result<PathBuf, Error>
+pub fn locate_dsym<T>(path: T, uuid: Uuid) -> Result<Option<PathBuf>, Error>
 where
     T: AsRef<Path>,
 {
     if let Some(dsym_path) = locate_dsym_fastpath(path.as_ref(), uuid) {
-        return Ok(dsym_path);
+        return Ok(Some(dsym_path));
     }
     locate_dsym_using_spotlight(uuid)
 }
 
 /// Attempt to locate the separate debug symbol file for the object file at `path` with
 /// build ID `id`.
-pub fn locate_debug_build_id(id: &[u8]) -> Result<PathBuf, Error> {
+pub fn locate_debug_build_id(id: &[u8]) -> Option<PathBuf> {
     if id.len() < 2 {
-        return Err(anyhow!("Build ID is too short"));
+        return None;
     }
 
     // Try "/usr/lib/debug/.build-id/12/345678etc.debug"
     let mut f = format!("/usr/lib/debug/.build-id/{:02x}/", id[0]);
     for x in &id[1..] {
-        write!(&mut f, "{:02x}", x).ok();
+        f = format!("{}{:02x}", f, x);
     }
-    write!(&mut f, ".debug").ok();
+    f = format!("{}{}", f, ".debug");
     let f = PathBuf::from(f);
     if f.exists() {
-        return Ok(f);
+        return Some(f);
     }
 
-    Err(anyhow!("Could not locate file with build ID"))
+    None
 }
 
 /// Attempt to locate the separate debug symbol file for the object file at `path` with
 /// GNU "debug link" information consisting of `filename` and `crc`.
-pub fn locate_gnu_debuglink<T, U>(path: T, filename: U, _crc: u32) -> Result<PathBuf, Error>
+pub fn locate_gnu_debuglink<T, U>(path: T, filename: U, _crc: u32) -> Result<Option<PathBuf>, Error>
 where
     T: AsRef<Path>,
     U: AsRef<Path>,
@@ -191,21 +191,21 @@ where
     // Try "/parent/filename" if it differs from "path"
     let f = parent.join(filename);
     if f != path && f.exists() {
-        return Ok(f);
+        return Ok(Some(f));
     }
 
     // Try "/parent/.debug/filename"
     let f = parent.join(".debug").join(filename);
     if f.exists() {
-        return Ok(f);
+        return Ok(Some(f));
     }
 
     // Try "/usr/lib/debug/parent/filename"
     let parent = parent.strip_prefix("/").unwrap();
     let f = Path::new("/usr/lib/debug").join(parent).join(filename);
     if f.exists() {
-        return Ok(f);
+        return Ok(Some(f));
     }
 
-    Err(anyhow!("Could not locate GNU debug link file"))
+    Ok(None)
 }

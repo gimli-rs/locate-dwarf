@@ -114,7 +114,7 @@ where
 }
 
 /// Attempt to locate the Mach-O file inside a dSYM matching `uuid` using spotlight.
-fn spotlight_locate_dsym_bundle(uuid: Uuid) -> Result<String> {
+fn spotlight_locate_dsym_bundle(uuid: Uuid) -> Result<Option<String>> {
     let uuid = uuid::Uuid::from_slice(&uuid[..])?
         .to_hyphenated()
         .to_string()
@@ -131,10 +131,10 @@ fn spotlight_locate_dsym_bundle(uuid: Uuid) -> Result<String> {
         }
         let cf_attr = unsafe { CFType::wrap_under_get_rule(cf_attr) };
         if let Ok(path) = cast::<CFType, CFString>(&cf_attr) {
-            return Ok(path.to_string());
+            return Ok(Some(path.to_string()));
         }
     }
-    Err(anyhow!("dSYM not found"))
+    Ok(None)
 }
 
 /// Get the path to the Mach-O file containing DWARF debug info inside `bundle`.
@@ -157,7 +157,13 @@ fn spotlight_get_dsym_path(bundle: &str) -> Result<String> {
     Err(anyhow!("dsym_paths array is empty"))
 }
 
-pub fn locate_dsym_using_spotlight(uuid: Uuid) -> Result<PathBuf> {
+pub fn locate_dsym_using_spotlight(uuid: Uuid) -> Result<Option<PathBuf>> {
     let bundle = spotlight_locate_dsym_bundle(uuid)?;
-    Ok(Path::new(&bundle).join(spotlight_get_dsym_path(&bundle)?))
+    if let Some(bundle) = bundle {
+        Ok(Some(
+            Path::new(&bundle).join(spotlight_get_dsym_path(&bundle)?),
+        ))
+    } else {
+        Ok(None)
+    }
 }
