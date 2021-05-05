@@ -13,14 +13,14 @@ cfg_if::cfg_if! {
         use std::ffi::OsStr;
         use std::os::unix::ffi::OsStrExt;
 
-        fn path_from_bytes(bytes: &[u8]) -> Result<&OsStr, Error> {
-            Ok(OsStr::from_bytes(bytes))
+        fn path_from_bytes(bytes: &[u8]) -> &OsStr {
+            OsStr::from_bytes(bytes)
         }
     } else {
         use std::str;
 
-        fn path_from_bytes(bytes: &[u8]) -> Result<&str, str::Utf8Error> {
-            str::from_utf8(bytes)
+        fn path_from_bytes(bytes: &[u8]) -> &str {
+            unsafe { str::from_utf8_unchecked(bytes) }
         }
     }
 }
@@ -135,7 +135,7 @@ where
         // If not found, try gnu_debuglink.
     }
     if let Some((filename, crc)) = object.gnu_debuglink()? {
-        let filename = path_from_bytes(filename)?;
+        let filename = path_from_bytes(filename);
         return locate_gnu_debuglink(path.as_ref(), filename, crc);
     }
     Err(anyhow!("Object does not have debug info pointer"))
