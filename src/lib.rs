@@ -13,6 +13,7 @@ cfg_if::cfg_if! {
         use std::ffi::OsStr;
         use std::os::unix::ffi::OsStrExt;
 
+        #[allow(clippy::unnecessary_wraps)]
         fn path_from_bytes(bytes: &[u8]) -> Result<&OsStr, Error> {
             Ok(OsStr::from_bytes(bytes))
         }
