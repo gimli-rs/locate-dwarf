@@ -2,6 +2,7 @@
 
 use anyhow::{anyhow, Error};
 use object::Object;
+use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -128,11 +129,11 @@ where
     if let Some(uuid) = object.mach_uuid()? {
         return locate_dsym(path.as_ref(), uuid);
     }
-    if let Some(build_id) = object.build_id()? {
-        let path = locate_debug_build_id(build_id);
-        if let Some(path) = path {
-            return Ok(Some(path));
-        }
+    if let Some(path) = object
+        .build_id()?
+        .and_then(|build_id| locate_debug_build_id(build_id))
+    {
+        return Ok(Some(path));
         // If not found, try gnu_debuglink.
     }
     if let Some((filename, crc)) = object.gnu_debuglink()? {
@@ -164,9 +165,9 @@ pub fn locate_debug_build_id(id: &[u8]) -> Option<PathBuf> {
     // Try "/usr/lib/debug/.build-id/12/345678etc.debug"
     let mut f = format!("/usr/lib/debug/.build-id/{:02x}/", id[0]);
     for x in &id[1..] {
-        f = format!("{}{:02x}", f, x);
+        let _ = write!(&mut f, "{:02x}", x);
     }
-    f = format!("{}{}", f, ".debug");
+    let _ = write!(&mut f, ".debug");
     let f = PathBuf::from(f);
     if f.exists() {
         return Some(f);
