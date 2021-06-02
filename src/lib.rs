@@ -1,6 +1,7 @@
 #![warn(clippy::all)]
 
 use anyhow::{anyhow, Error};
+use core::convert::TryInto;
 use object::Object;
 use std::fmt::Write;
 use std::fs;
@@ -129,6 +130,9 @@ where
     if let Some(uuid) = object.mach_uuid()? {
         return locate_dsym(path.as_ref(), uuid);
     }
+    if let Some(pdbinfo) = object.pdb_info()? {
+        return locate_pdb(path.as_ref(), &pdbinfo);
+    }
     if let Some(path) = object
         .build_id()?
         .and_then(|build_id| locate_debug_build_id(build_id))
@@ -153,6 +157,48 @@ where
         return Ok(Some(dsym_path));
     }
     locate_dsym_using_spotlight(uuid)
+}
+
+/// Attempt to locate the PDB file for an executable that is at `path` with the
+/// pdb infomation stored in `pdbinfo`.
+pub fn locate_pdb<T>(path: T, pdbinfo: &object::CodeView) -> Result<Option<PathBuf>, Error>
+where
+    T: AsRef<Path>,
+{
+    // First check path in PDB
+    let codeview_path = PathBuf::from(path_from_bytes(pdbinfo.path())?);
+    if try_match_pdb(pdbinfo.guid(), pdbinfo.age(), &codeview_path)? {
+        return Ok(Some(codeview_path));
+    }
+
+    // Next check /parent/basename.pdb
+    let mut path = fs::canonicalize(path)?;
+    path.set_extension("pdb");
+    if try_match_pdb(pdbinfo.guid(), pdbinfo.age(), &path)? {
+        return Ok(Some(path));
+    }
+
+    Ok(None)
+}
+
+fn try_match_pdb(guid: [u8; 16], age: u32, path: &Path) -> Result<bool, Error> {
+    let file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(_) => return Ok(false),
+    };
+    let mut pdb = match pdb::PDB::open(file) {
+        Ok(pdb) => pdb,
+        Err(_) => return Ok(false),
+    };
+
+    let info = pdb.pdb_information()?;
+    let id = uuid::Uuid::from_fields(
+        u32::from_le_bytes(guid[0..4].try_into().unwrap()),
+        u16::from_le_bytes(guid[4..6].try_into().unwrap()),
+        u16::from_le_bytes(guid[6..8].try_into().unwrap()),
+        &guid[8..16],
+    )?;
+    Ok(info.age == age && info.guid == id)
 }
 
 /// Attempt to locate the separate debug symbol file for the object file at `path` with
