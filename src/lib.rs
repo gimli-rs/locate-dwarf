@@ -8,23 +8,11 @@ use std::path::{Path, PathBuf};
 
 pub type Uuid = [u8; 16];
 
-cfg_if::cfg_if! {
-    if #[cfg(unix)] {
-        use std::ffi::OsStr;
-        use std::os::unix::ffi::OsStrExt;
+mod pdb;
+use crate::pdb::locate_pdb;
 
-        #[allow(clippy::unnecessary_wraps)]
-        fn path_from_bytes(bytes: &[u8]) -> Result<&OsStr, Error> {
-            Ok(OsStr::from_bytes(bytes))
-        }
-    } else {
-        use std::str;
-
-        fn path_from_bytes(bytes: &[u8]) -> Result<&str, str::Utf8Error> {
-            str::from_utf8(bytes)
-        }
-    }
-}
+mod path_utils;
+use crate::path_utils::path_from_bytes;
 
 cfg_if::cfg_if! {
     if #[cfg(target_os = "macos")] {
@@ -128,6 +116,9 @@ where
 {
     if let Some(uuid) = object.mach_uuid()? {
         return locate_dsym(path.as_ref(), uuid);
+    }
+    if let Some(pdbinfo) = object.pdb_info()? {
+        return locate_pdb(path.as_ref(), &pdbinfo);
     }
     if let Some(path) = object
         .build_id()?
