@@ -1,5 +1,5 @@
 # locate-dwarf
-A crate to find DWARF debug symbols from stripped binaries
+A crate to find DWARF debug symbols from stripped binaries.
 
 ## License
 
