@@ -62,18 +62,21 @@ fn locate_dsym_fastpath(path: &Path, uuid: Uuid) -> Option<PathBuf> {
     }
 
     // Check every entry in <target_channel_dir>/deps and <target_channel_dir>/examples
-    for dir in fs::read_dir(target_channel_dir.join("deps"))
-        .unwrap()
-        .chain(fs::read_dir(target_channel_dir.join("examples")).unwrap())
-    {
-        let dir = dir.unwrap().path();
+    let deps_dir = target_channel_dir.join("deps");
+    let examples_dir = target_channel_dir.join("examples");
+    try_match_dsym_in_dir(&deps_dir, uuid).or_else(|| try_match_dsym_in_dir(&examples_dir, uuid))
+}
+
+fn try_match_dsym_in_dir(dir: &Path, uuid: Uuid) -> Option<PathBuf> {
+    for entry in fs::read_dir(dir).ok()? {
+        let item = entry.ok()?.path();
 
         // If not a dSYM dir, try next entry.
-        if dir.extension() != Some(std::ffi::OsStr::new("dSYM")) {
+        if item.extension() != Some(std::ffi::OsStr::new("dSYM")) {
             continue;
         }
 
-        if let Some(debug_file_name) = try_match_dsym(&dir, uuid) {
+        if let Some(debug_file_name) = try_match_dsym(&item, uuid) {
             return Some(debug_file_name);
         }
     }
