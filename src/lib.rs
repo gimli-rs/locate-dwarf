@@ -125,7 +125,7 @@ where
     }
     if let Some(path) = object
         .build_id()?
-        .and_then(|build_id| locate_debug_build_id(build_id))
+        .and_then(locate_debug_build_id)
     {
         return Ok(Some(path));
         // If not found, try gnu_debuglink.
