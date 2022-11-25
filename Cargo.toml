@@ -1,7 +1,7 @@
 [package]
 name = "locate-dwarf"
 description = "Locate debug symbols for stripped binaries."
-version = "0.1.0"
+version = "0.2.0"
 edition = "2018"
 license = "MIT OR Apache-2.0"
 authors = ["Ted Mielczarek <ted@mielczarek.org>"]
@@ -15,6 +15,6 @@ object = "0.30.0"
 pdb = "0.7.0"
 uuid = "0.8.2"
 
-[target.'cfg(target_os="macos")'.dependencies]
+[target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.9.1"
 core-foundation-sys = "0.8.2"
