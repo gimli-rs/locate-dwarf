@@ -123,10 +123,7 @@ where
     if let Some(pdbinfo) = object.pdb_info()? {
         return locate_pdb(path.as_ref(), &pdbinfo);
     }
-    if let Some(path) = object
-        .build_id()?
-        .and_then(locate_debug_build_id)
-    {
+    if let Some(path) = object.build_id()?.and_then(locate_debug_build_id) {
         return Ok(Some(path));
         // If not found, try gnu_debuglink.
     }
