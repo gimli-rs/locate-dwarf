@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use crate::path_utils::path_from_bytes;
 
 /// Attempt to locate the PDB file for an executable that is at `path` with the
-/// pdb infomation stored in `pdbinfo`.
+/// pdb information stored in `pdbinfo`.
 pub fn locate_pdb<T>(path: T, pdbinfo: &object::CodeView) -> Result<Option<PathBuf>, Error>
 where
     T: AsRef<Path>,
